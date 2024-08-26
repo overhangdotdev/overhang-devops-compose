@@ -1,0 +1,149 @@
+services:
+  postgres:
+    container_name: postgres
+    image: postgres
+    depends_on:
+      overhang-backend-config:
+        condition: service_healthy
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    expose:
+      - "5432"
+    networks:
+      - overhang-network
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d/
+
+  rabbitmq:
+    image: rabbitmq:latest
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    expose:
+      - "5672"
+    networks:
+      - overhang-network
+
+  overhang-backend-gateway:
+    build:
+      context: ../overhang-backend-gateway
+      dockerfile: Dockerfile
+      args:
+        SKIP_TESTS: true
+    container_name: overhang-backend-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_CONFIG_IMPORT=http://overhang-backend-config:8888/
+      - AUTH_SERVICE_URL=http://overhang-backend-auth:8081/
+      - IDENTITY_SERVICE_URL=http://overhang-backend-identity:8082/
+    depends_on:
+      overhang-backend-auth:
+        condition: service_healthy
+      overhang-backend-config:
+        condition: service_healthy
+      overhang-backend-identity:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - overhang-network
+
+  overhang-backend-auth:
+    build:
+      context: ../overhang-backend-auth
+      dockerfile: Dockerfile
+      args:
+        SKIP_TESTS: true
+    container_name: overhang-backend-auth
+    expose:
+      - "8081"
+    environment:
+      - JWT_EXPIRATION=86400000 # 1 day
+      - JWT_SECRET=0c39f331f68026adb5226e297264f4818490350fbb72b5ac6a7d36d75ef75943 # Dummy secret
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=guest
+      - RABBITMQ_PASSWORD=guest
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_CONFIG_IMPORT=http://overhang-backend-config:8888/
+    depends_on:
+      overhang-backend-config:
+        condition: service_healthy
+        restart: true
+      postgres:
+        condition: service_started
+        restart: true
+      rabbitmq:
+        condition: service_started
+        restart: true
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://localhost:8081/actuator/health"]
+      interval: 10s 
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - overhang-network
+
+  overhang-backend-identity:
+    build:
+      context: ../overhang-backend-identity
+      dockerfile: Dockerfile
+      args:
+        SKIP_TESTS: true
+    container_name: overhang-backend-identity
+    expose:
+      - "8082"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=guest
+      - RABBITMQ_PASSWORD=guest
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_CONFIG_IMPORT=http://overhang-backend-config:8888/
+    depends_on:
+      overhang-backend-config:
+        condition: service_healthy
+        restart: true
+      postgres:
+        condition: service_started
+        restart: true
+      rabbitmq:
+        condition: service_started
+        restart: true
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - overhang-network
+
+  overhang-backend-config:
+    build:
+      context: ../overhang-backend-config
+      dockerfile: Dockerfile
+    container_name: overhang-backend-config
+    expose:
+      - "8888"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - overhang-network
+
+networks:
+  overhang-network:
+    driver: bridge
